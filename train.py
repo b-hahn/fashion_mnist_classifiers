@@ -109,7 +109,7 @@ def setup_wandb(model, config):
     wandb.init(project="fashion_mnist", anonymous="allow", config=config)
     wandb.watch(model, log="all")
 
-def test(model, test_loader):
+def test(model, test_loader, compute_confusion_matrix=False):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     dataiter = iter(test_loader)
@@ -117,6 +117,8 @@ def test(model, test_loader):
 
     correct = 0
     total = 0
+    confusion_matrix = torch.zeros(10, 10)
+
     with torch.no_grad():
         for data in test_loader:
             images, labels = data[0].to(device), data[1].to(device)
@@ -124,10 +126,16 @@ def test(model, test_loader):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+            if compute_confusion_matrix:
+                for t, p in zip(labels.view(-1), predicted.view(-1)):
+                        confusion_matrix[t.long(), p.long()] += 1
     wandb.log({
       "Test Loss": 100 * correct / total})        
     print('Accuracy of the network on the 10000 test images: %d %%' % (
         100 * correct / total))
+    if compute_confusion_matrix:
+        print(confusion_matrix)
+
 
 
 
@@ -156,6 +164,7 @@ def train(model, optimizer, criterion, lr_scheduler, train_loader, valid_loader,
                         (epoch + 1, i + 1, running_loss / 200))
                 running_loss = 0.0
                 test(model, test_loader)
+
         if config["use_lr_decay"]:
             print(f"Decreasing learning rate to {lr_scheduler.get_lr()}, i.e. {config['lr_decay_rate']**(epoch+1)*100}%")
             lr_scheduler.step()
@@ -169,14 +178,16 @@ def train(model, optimizer, criterion, lr_scheduler, train_loader, valid_loader,
             loss = criterion(output, labels)
             valid_losses.append(loss.item())
 
+
         valid_loss = np.average(valid_losses)
         early_stopping(valid_loss, model)
         
         if early_stopping.early_stop:
             print("Early stopping")
             break
-        
+    
     print('Finished training.')
+    test(model, test_loader, compute_confusion_matrix=True)
 
 def main():
     print("Starting training...")
